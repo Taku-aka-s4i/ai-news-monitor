@@ -3,4 +3,6 @@ venv/
 __pycache__/
 *.pyc
 seen_articles.json
+seen_ai.json
+seen_realestate.json
 logs/
