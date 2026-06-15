@@ -12,6 +12,10 @@ AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日
 | Google DeepMind | https://deepmind.google/blog/rss.xml |
 | VentureBeat AI | https://venturebeat.com/category/ai/feed/ |
 | TechCrunch AI | https://techcrunch.com/category/artificial-intelligence/feed/ |
+| Google AI Blog | https://blog.google/technology/ai/rss/ |
+| Hugging Face | https://huggingface.co/blog/feed.xml |
+| The Decoder | https://the-decoder.com/feed/ |
+| MIT Tech Review | https://www.technologyreview.com/feed/ |
 
 ### 処理フロー
 1. **RSS取得** — 各フィードから最新10件を取得

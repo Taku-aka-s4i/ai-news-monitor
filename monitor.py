@@ -26,6 +26,10 @@ FEEDS = {
         {"name": "Google DeepMind", "url": "https://deepmind.google/blog/rss.xml"},
         {"name": "VentureBeat AI",  "url": "https://venturebeat.com/category/ai/feed/"},
         {"name": "TechCrunch AI",   "url": "https://techcrunch.com/category/artificial-intelligence/feed/"},
+        {"name": "Google AI Blog",  "url": "https://blog.google/technology/ai/rss/"},
+        {"name": "Hugging Face",    "url": "https://huggingface.co/blog/feed.xml"},
+        {"name": "The Decoder",     "url": "https://the-decoder.com/feed/"},
+        {"name": "MIT Tech Review", "url": "https://www.technologyreview.com/feed/"},
     ],
     "realestate": [
         {"name": "楽待新聞",       "url": "https://www.rakumachi.jp/news/feed/"},
