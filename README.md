@@ -4,12 +4,14 @@ AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日
 
 ## 機能
 
-### 監視対象
-| 企業 | RSS URL |
-|------|---------|
+### 監視対象（AIモード）
+| メディア | RSS URL |
+|---------|---------|
 | OpenAI | https://openai.com/news/rss.xml |
 | Anthropic | https://www.anthropic.com/rss.xml |
 | Google DeepMind | https://deepmind.google/blog/rss.xml |
+| VentureBeat AI | https://venturebeat.com/category/ai/feed/ |
+| TechCrunch AI | https://techcrunch.com/category/artificial-intelligence/feed/ |
 
 ### 処理フロー
 1. **RSS取得** — 各フィードから最新10件を取得
@@ -76,7 +78,6 @@ ai-monitor/
 ```
 
 ## 今後の拡張予定
-- 監視対象RSS追加（VentureBeat・TechCrunch AI等）
 - 不動産×AI特化のキーワードフィルタリング
 - 複数送信先対応（チーム共有）
 - 重要度スコアリングによる厳選配信

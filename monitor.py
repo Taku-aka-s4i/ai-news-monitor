@@ -24,6 +24,8 @@ FEEDS = {
         {"name": "OpenAI",          "url": "https://openai.com/news/rss.xml"},
         {"name": "Anthropic",       "url": "https://www.anthropic.com/rss.xml"},
         {"name": "Google DeepMind", "url": "https://deepmind.google/blog/rss.xml"},
+        {"name": "VentureBeat AI",  "url": "https://venturebeat.com/category/ai/feed/"},
+        {"name": "TechCrunch AI",   "url": "https://techcrunch.com/category/artificial-intelligence/feed/"},
     ],
     "realestate": [
         {"name": "楽待新聞",       "url": "https://www.rakumachi.jp/news/feed/"},
@@ -37,8 +39,8 @@ MODE_CONFIG = {
         "seen_file": "seen_ai.json",
         "email_subject": f"【AI新着】{{date}} — {{count}}件の新着記事",
         "email_header": "AI最新情報まとめ",
-        "summary_prompt": "以下はAI企業「{source}」の記事です。日本語で3〜5行、平易な言葉でざっくり要約してください。\n\nタイトル: {title}\n\n本文:\n{body}",
-        "summary_prompt_notitle": "以下はAI企業「{source}」の記事タイトルです。タイトルから推測できる内容を日本語で3〜5行、平易な言葉で説明してください。\n\nタイトル: {title}",
+        "summary_prompt": "以下はAI分野のメディア「{source}」の記事です（英語の場合も含む）。日本語で3〜5行、平易な言葉でざっくり要約してください。\n\nタイトル: {title}\n\n本文:\n{body}",
+        "summary_prompt_notitle": "以下はAI分野のメディア「{source}」の記事タイトルです（英語の場合も含む）。タイトルから推測できる内容を日本語で3〜5行、平易な言葉で説明してください。\n\nタイトル: {title}",
     },
     "realestate": {
         "seen_file": "seen_realestate.json",
