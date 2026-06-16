@@ -1,10 +1,13 @@
 import os
+import sys
 import json
 import smtplib
 import argparse
 import feedparser
 import requests
 from pathlib import Path
+
+sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
