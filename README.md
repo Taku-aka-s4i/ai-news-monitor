@@ -34,11 +34,35 @@ AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日
 ```
 
 ### 自動実行
-Windowsタスクスケジューラで毎朝8時に `run.bat` を実行。ログは `logs/monitor.log` に記録。
+macOSのlaunchdで1日3回自動実行される。ログは `logs/monitor.log` に記録。
+
+| 時刻 | モード | 内容 |
+|-----|--------|-----|
+| 09:00 | ai | AI関連フィードを取得・要約・送信 |
+| 12:00 | realestate | 不動産関連フィードを取得・要約・送信 |
+| 15:00 | ai | AI関連フィードを再取得・要約・送信 |
+
+launchdの`.plist`は `~/Library/LaunchAgents/` に配置:
+- `com.takuma.ai-news-monitor.ai-morning.plist`（9時／ai）
+- `com.takuma.ai-news-monitor.realestate-noon.plist`（12時／realestate）
+- `com.takuma.ai-news-monitor.ai-afternoon.plist`（15時／ai）
+
+指定時刻にMacがスリープ中ならスリープ復帰時に、電源オフならログイン時に自動的に実行される（launchdの仕様）。
+
+Windows環境の場合はタスクスケジューラで `run.bat` を実行する構成でも動作する（旧構成）。
 
 ## セットアップ
 
 ### 1. 依存パッケージのインストール
+
+macOS / Linux:
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+Windows:
 ```bash
 python -m venv venv
 venv\Scripts\activate
@@ -57,7 +81,14 @@ RECIPIENT_EMAIL=your@gmail.com
 
 ### 3. 動作確認
 ```bash
-python monitor.py
+python monitor.py --mode ai          # AI関連フィード
+python monitor.py --mode realestate  # 不動産関連フィード
+```
+
+macOSの場合、ラッパースクリプト経由でも実行可能:
+```bash
+./run.sh ai
+./run.sh realestate
 ```
 
 ## 技術スタック
@@ -70,15 +101,20 @@ python monitor.py
 
 ## ファイル構成
 ```
-ai-monitor/
-├── monitor.py          # メインスクリプト
+ai-news-monitor/
+├── monitor.py               # メインスクリプト
 ├── requirements.txt
-├── run.bat             # タスクスケジューラ用
-├── .env.example        # 認証情報テンプレート
-├── .env                # 認証情報（gitignore済み）
-├── seen_articles.json  # 送信済み記事管理（自動生成）
+├── run.sh                   # macOS/Linux用ラッパー
+├── run.bat                  # Windowsタスクスケジューラ用
+├── run-ai.bat               # Windows用（AIモード）
+├── run-realestate.bat       # Windows用（不動産モード）
+├── .env.example             # 認証情報テンプレート
+├── .env                     # 認証情報（gitignore済み）
+├── seen_ai.json             # AI関連の送信済み記事管理（自動生成）
+├── seen_realestate.json     # 不動産関連の送信済み記事管理（自動生成）
+├── seen_watch_realestate.json  # 不動産の差分検知ハッシュ（自動生成）
 └── logs/
-    └── monitor.log     # 実行ログ
+    └── monitor.log          # 実行ログ
 ```
 
 ## 今後の拡張予定
