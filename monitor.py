@@ -72,7 +72,7 @@ MODE_CONFIG = {
 
 SECTION_ORDER = ["一次情報", "業界メディア"]
 
-client = Anthropic(api_key=ANTHROPIC_API_KEY)
+client = Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0, max_retries=2)
 
 
 def load_seen(seen_path: Path) -> set:
@@ -93,6 +93,16 @@ def load_watch_hashes(watch_path: Path) -> dict:
 
 def save_watch_hashes(hashes: dict, watch_path: Path):
     watch_path.write_text(json.dumps(hashes, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def fetch_feed(url: str):
+    """RSSフィードをタイムアウト付きで取得してパースする。取得失敗時は空のフィードを返す。"""
+    try:
+        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp.raise_for_status()
+        return feedparser.parse(resp.content)
+    except Exception:
+        return feedparser.parse(b"")
 
 
 def fetch_article_text(url: str) -> str:
@@ -195,7 +205,7 @@ def send_email(body: str, total_count: int, config: dict):
     msg["Subject"] = subject
     msg.attach(MIMEText(body, "plain", "utf-8"))
 
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+    with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=30) as server:
         server.login(GMAIL_ADDRESS, GMAIL_APP_PASSWORD)
         server.send_message(msg)
 
@@ -216,7 +226,7 @@ def main():
 
     rss_feeds = [f for f in FEEDS[args.mode] if f.get("type", "rss") == "rss"]
     for feed_info in rss_feeds:
-        feed = feedparser.parse(feed_info["url"])
+        feed = fetch_feed(feed_info["url"])
         for entry in feed.entries[:10]:
             url = entry.get("link", "")
             if not url or url in seen:
