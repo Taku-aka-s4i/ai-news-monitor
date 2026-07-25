@@ -27,6 +27,7 @@ RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
 # type: "rss" = RSSフィード, "scrape" = 一覧ページから記事リンクを抽出, "watch" = ページ差分検知
 # link_pattern: type="scrape" のとき、記事リンクとみなすhrefの正規表現
+# max_items: 1回の実行で確認する件数（省略時はDEFAULT_MAX_ITEMS）
 # section: メール内のセクション名（""なら区分けなし）
 FEEDS = {
     "ai": [
@@ -47,7 +48,10 @@ FEEDS = {
         {"name": "REINSライブラリ",       "url": "https://www.reins.or.jp/library/",                                    "type": "watch", "section": "一次情報"},
         {"name": "不動産経済研究所",      "url": "https://www.fudousankeizai.co.jp/",                                   "type": "watch", "section": "一次情報"},
         # 業界メディアライン（RSS）
-        {"name": "楽待新聞",              "url": "https://www.rakumachi.jp/news/feed/",                                  "type": "rss",   "section": "業界メディア"},
+        # 楽待新聞のRSSは配信が止まっている（2026-07-25時点で200が返るが<item>が0件）ため一覧ページをスクレイプする。
+        # 一覧が新着順ではなく常設記事が上位を占めるので、確認件数を多めに取る。
+        {"name": "楽待新聞",              "url": "https://www.rakumachi.jp/news/",                                       "type": "scrape", "section": "業界メディア",
+         "link_pattern": r"^https://www\.rakumachi\.jp/news/(column|practical)/\d+$", "max_items": 20},
         {"name": "SUUMOジャーナル",       "url": "https://suumo.jp/journal/feed/",                                       "type": "rss",   "section": "業界メディア"},
         {"name": "住宅産業新聞",          "url": "https://www.housenews.jp/feed",                                        "type": "rss",   "section": "業界メディア"},
     ],
@@ -80,6 +84,9 @@ SECTION_ORDER = ["一次情報", "業界メディア"]
 
 # 記事が1件も取れない実行がこの回数続いたら、取得元が壊れたとみなして警告する
 EMPTY_RUN_ALERT_THRESHOLD = 3
+
+# 1回の実行で確認する記事数の既定値（取得元ごとに max_items で上書きできる）
+DEFAULT_MAX_ITEMS = 10
 
 UA_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
@@ -190,9 +197,12 @@ def fetch_scraped_links(url: str, link_pattern: str) -> tuple[list, str]:
     found = set()
 
     for a in soup.find_all("a", href=True):
-        if not pattern.match(a["href"]):
+        # utm_campaign等のトラッキングパラメータは記事の同一性に関係しないので、
+        # パターン照合と重複判定の前に落とす（同じ記事が別URLとして二重に届くのを防ぐ）
+        href = a["href"].split("?")[0].split("#")[0]
+        if not pattern.match(href):
             continue
-        link = urljoin(url, a["href"])
+        link = urljoin(url, href)
         if link in found:
             continue
 
@@ -381,14 +391,19 @@ def main():
             streak = record["consecutive_failures"]
             print(f"  [失敗] {name}: {error}（{streak}回連続）")
 
-        for entry in entries[:10]:
+        for entry in entries[:feed_info.get("max_items", DEFAULT_MAX_ITEMS)]:
             url = entry.get("link", "")
             if not url or url in seen:
                 continue
             title = entry.get("title", "(タイトルなし)")
             print(f"  処理中: [{name}] {title}")
-            body = fetch_article_text(url)
-            summary = summarize(name, title, body, config)
+            try:
+                body = fetch_article_text(url)
+                summary = summarize(name, title, body, config)
+            except Exception as e:
+                # 1記事の失敗で配信全体を落とさない。seenに入れないので次回再試行される
+                print(f"    → 要約失敗、スキップ: {e}")
+                continue
             new_articles.append({
                 "source":  name,
                 "title":   title,
@@ -398,16 +413,13 @@ def main():
             })
             seen.add(url)
 
-    save_seen(seen, seen_path)
-
     # ── 差分検知処理 ─────────────────────────────────────
     page_updates = []
     watch_feeds = [f for f in FEEDS[args.mode] if f.get("type") == "watch"]
+    watch_path = base_dir / config["watch_file"] if watch_feeds and config["watch_file"] else None
+    watch_hashes = load_watch_hashes(watch_path) if watch_path else {}
 
-    if watch_feeds and config["watch_file"]:
-        watch_path = base_dir / config["watch_file"]
-        watch_hashes = load_watch_hashes(watch_path)
-
+    if watch_path:
         for feed_info in watch_feeds:
             url = feed_info["url"]
             name = feed_info["name"]
@@ -429,8 +441,6 @@ def main():
                 })
             watch_hashes[url] = new_hash
 
-        save_watch_hashes(watch_hashes, watch_path)
-
     # ── 取得元の健全性チェック ────────────────────────────
     warnings = collect_health_warnings(health)
     for warning in warnings:
@@ -446,9 +456,18 @@ def main():
         # 通常配信。警告があれば末尾に付けて気づけるようにする
         email_body = build_email_body(new_articles, page_updates, config, warnings)
         send_email(email_body, total_count, config)
+        # 送信が成功してから既読・ハッシュを確定させる。
+        # 先に保存すると、送信失敗時に「配信済み扱いだが届いていない」記事が生まれ、二度と配信されない
+        save_seen(seen, seen_path)
+        if watch_path:
+            save_watch_hashes(watch_hashes, watch_path)
         print(f"メール送信完了（記事:{len(new_articles)}件 / 更新検知:{len(page_updates)}件）")
     else:
         print("新着・更新なし。メール送信をスキップします。")
+        # 配信待ちの内容が無いので、そのまま確定してよい（watchの初回登録もここで保存される）
+        save_seen(seen, seen_path)
+        if watch_path:
+            save_watch_hashes(watch_hashes, watch_path)
         # 新着が無いと通常メールが飛ばないため、警告だけ別途通知する（1日1回まで）
         today = datetime.now().strftime("%Y-%m-%d")
         if warnings and health.get("last_alert_date") != today:
