@@ -3,10 +3,12 @@ import sys
 import json
 import hashlib
 import smtplib
+import re
 import argparse
 import feedparser
 import requests
 from pathlib import Path
+from urllib.parse import urljoin
 
 sys.stdout.reconfigure(encoding='utf-8', errors='replace')
 from datetime import datetime
@@ -23,12 +25,14 @@ GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
 
-# type: "rss" = RSSフィード, "watch" = ページ差分検知
+# type: "rss" = RSSフィード, "scrape" = 一覧ページから記事リンクを抽出, "watch" = ページ差分検知
+# link_pattern: type="scrape" のとき、記事リンクとみなすhrefの正規表現
 # section: メール内のセクション名（""なら区分けなし）
 FEEDS = {
     "ai": [
         {"name": "OpenAI",                "url": "https://openai.com/news/rss.xml",                                           "type": "rss", "section": ""},
-        {"name": "Anthropic",             "url": "https://www.anthropic.com/rss.xml",                                         "type": "rss", "section": ""},
+        # AnthropicはRSSを提供していない（2026-07-25時点で /rss.xml 等は全て404）ため一覧ページを直接スクレイプする
+        {"name": "Anthropic",             "url": "https://www.anthropic.com/news",                                            "type": "scrape", "section": "", "link_pattern": r"^/news/[^/?#]+$"},
         {"name": "Google DeepMind",       "url": "https://deepmind.google/blog/rss.xml",                                      "type": "rss", "section": ""},
         {"name": "VentureBeat AI",        "url": "https://venturebeat.com/category/ai/feed/",                                 "type": "rss", "section": ""},
         {"name": "TechCrunch AI",         "url": "https://techcrunch.com/category/artificial-intelligence/feed/",             "type": "rss", "section": ""},
@@ -53,6 +57,7 @@ MODE_CONFIG = {
     "ai": {
         "seen_file":    "seen_ai.json",
         "watch_file":   None,
+        "health_file":  "health_ai.json",
         "use_sections": False,
         "email_subject": f"【AI新着】{{date}} — {{count}}件の新着記事",
         "email_header":  "AI最新情報まとめ",
@@ -62,6 +67,7 @@ MODE_CONFIG = {
     "realestate": {
         "seen_file":    "seen_realestate.json",
         "watch_file":   "seen_watch_realestate.json",
+        "health_file":  "health_realestate.json",
         "use_sections": True,
         "email_subject": "【不動産新着】{date} — {count}件の新着",
         "email_header":  "不動産最新情報まとめ",
@@ -71,6 +77,11 @@ MODE_CONFIG = {
 }
 
 SECTION_ORDER = ["一次情報", "業界メディア"]
+
+# 記事が1件も取れない実行がこの回数続いたら、取得元が壊れたとみなして警告する
+EMPTY_RUN_ALERT_THRESHOLD = 3
+
+UA_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 client = Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0, max_retries=2)
 
@@ -95,19 +106,120 @@ def save_watch_hashes(hashes: dict, watch_path: Path):
     watch_path.write_text(json.dumps(hashes, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def fetch_feed(url: str):
-    """RSSフィードをタイムアウト付きで取得してパースする。取得失敗時は空のフィードを返す。"""
+def load_health(health_path: Path) -> dict:
+    if health_path.exists():
+        try:
+            return json.loads(health_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"sources": {}, "last_alert_date": ""}
+
+
+def save_health(health: dict, health_path: Path):
+    health_path.write_text(json.dumps(health, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def record_health(health: dict, name: str, ok: bool, error: str) -> dict:
+    """取得元1件分の成否を記録し、更新後のレコードを返す。
+
+    ok=False が EMPTY_RUN_ALERT_THRESHOLD 回続いた取得元は警告対象になる。
+    """
+    record = health.setdefault("sources", {}).setdefault(name, {})
+    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+    if ok:
+        record["consecutive_failures"] = 0
+        record["last_ok"] = now
+        record["last_error"] = ""
+    else:
+        record["consecutive_failures"] = record.get("consecutive_failures", 0) + 1
+        record["last_error"] = error
+        record.setdefault("last_ok", "")
+    return record
+
+
+def collect_health_warnings(health: dict) -> list[str]:
+    """連続失敗が閾値に達した取得元の警告文を組み立てる。"""
+    warnings = []
+    for name, record in sorted(health.get("sources", {}).items()):
+        streak = record.get("consecutive_failures", 0)
+        if streak < EMPTY_RUN_ALERT_THRESHOLD:
+            continue
+        last_ok = record.get("last_ok") or "記録なし"
+        warnings.append(
+            f"⚠️ {name}: {streak}回連続で取得できていません（{record.get('last_error', '原因不明')}）"
+            f"\n   最終取得成功: {last_ok}"
+        )
+    return warnings
+
+
+def fetch_feed(url: str) -> tuple[list, str]:
+    """RSSフィードをタイムアウト付きで取得してパースする。
+
+    戻り値は (エントリのリスト, エラー文字列)。成功時のエラー文字列は空。
+    """
     try:
-        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=15, headers=UA_HEADERS)
         resp.raise_for_status()
-        return feedparser.parse(resp.content)
-    except Exception:
-        return feedparser.parse(b"")
+    except Exception as e:
+        return [], f"取得失敗: {e}"
+
+    parsed = feedparser.parse(resp.content)
+    if not parsed.entries:
+        # bozo_exception はパース失敗の原因（XMLでないHTMLが返ってきた等）を持つ
+        if parsed.bozo:
+            return [], f"パース失敗: {parsed.bozo_exception}"
+        return [], "フィードは取得できたがエントリが0件"
+    return list(parsed.entries), ""
+
+
+def fetch_scraped_links(url: str, link_pattern: str) -> tuple[list, str]:
+    """一覧ページのHTMLから記事リンクとタイトルを抽出する。
+
+    RSSが提供されていないサイト向け。戻り値は fetch_feed と同じ (エントリ, エラー文字列) で、
+    エントリは feedparser と同じく "link" / "title" を持つ辞書。
+    """
+    try:
+        resp = requests.get(url, timeout=15, headers=UA_HEADERS)
+        resp.raise_for_status()
+    except Exception as e:
+        return [], f"取得失敗: {e}"
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    pattern = re.compile(link_pattern)
+    entries = []
+    found = set()
+
+    for a in soup.find_all("a", href=True):
+        if not pattern.match(a["href"]):
+            continue
+        link = urljoin(url, a["href"])
+        if link in found:
+            continue
+
+        # CSSクラス名はビルドごとに変わるため構造だけで判断する。
+        # 見出しタグがあればそれを、無ければ日付・カテゴリを除いたリンクテキストをタイトルとする。
+        heading = a.find(["h1", "h2", "h3", "h4"])
+        if heading:
+            title = heading.get_text(" ", strip=True)
+        else:
+            for time_tag in a.find_all("time"):
+                (time_tag.parent if time_tag.parent is not a else time_tag).decompose()
+            title = a.get_text(" ", strip=True)
+
+        title = " ".join(title.split())
+        if not title:
+            continue
+        found.add(link)
+        entries.append({"link": link, "title": title})
+
+    if not entries:
+        return [], f"HTMLから記事リンクを抽出できなかった（パターン: {link_pattern}）"
+    return entries, ""
 
 
 def fetch_article_text(url: str) -> str:
     try:
-        resp = requests.get(url, timeout=10, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=10, headers=UA_HEADERS)
         resp.raise_for_status()
         soup = BeautifulSoup(resp.text, "html.parser")
         for tag in soup(["script", "style", "nav", "header", "footer"]):
@@ -119,18 +231,21 @@ def fetch_article_text(url: str) -> str:
         return ""
 
 
-def compute_page_hash(url: str) -> str:
-    """ページのテキストコンテンツをMD5ハッシュ化して返す。取得失敗時は空文字。"""
+def compute_page_hash(url: str) -> tuple[str, str]:
+    """ページのテキストコンテンツをMD5ハッシュ化して返す。戻り値は (ハッシュ, エラー文字列)。"""
     try:
-        resp = requests.get(url, timeout=15, headers={"User-Agent": "Mozilla/5.0"})
+        resp = requests.get(url, timeout=15, headers=UA_HEADERS)
         resp.raise_for_status()
-        soup = BeautifulSoup(resp.text, "html.parser")
-        for tag in soup(["script", "style", "nav", "header", "footer"]):
-            tag.decompose()
-        text = soup.get_text(separator=" ", strip=True)
-        return hashlib.md5(text.encode("utf-8")).hexdigest()
-    except Exception:
-        return ""
+    except Exception as e:
+        return "", f"取得失敗: {e}"
+
+    soup = BeautifulSoup(resp.text, "html.parser")
+    for tag in soup(["script", "style", "nav", "header", "footer"]):
+        tag.decompose()
+    text = soup.get_text(separator=" ", strip=True)
+    if not text:
+        return "", "ページ本文が空"
+    return hashlib.md5(text.encode("utf-8")).hexdigest(), ""
 
 
 def summarize(source: str, title: str, body: str, config: dict) -> str:
@@ -147,7 +262,8 @@ def summarize(source: str, title: str, body: str, config: dict) -> str:
     return message.content[0].text.strip()
 
 
-def build_email_body(articles: list[dict], page_updates: list[dict], config: dict) -> str:
+def build_email_body(articles: list[dict], page_updates: list[dict], config: dict,
+                     warnings: list[str] | None = None) -> str:
     date_str = datetime.now().strftime('%Y年%m月%d日')
     fetch_time = datetime.now().strftime('%Y/%m/%d %H:%M')
     lines = [f"{config['email_header']} — {date_str}\n"]
@@ -192,13 +308,31 @@ def build_email_body(articles: list[dict], page_updates: list[dict], config: dic
             lines.append(f"🔗 元記事 → {a['url']}")
             lines.append("")
 
+    if warnings:
+        lines.append("=" * 36)
+        lines.append("【取得元の異常】")
+        lines.append("=" * 36)
+        lines.extend(warnings)
+        lines.append("")
+        lines.append("※ 配信元のURL変更・フィード廃止が疑われます。monitor.py の FEEDS を確認してください。")
+
     return "\n".join(lines)
 
 
-def send_email(body: str, total_count: int, config: dict):
-    date_str = datetime.now().strftime('%m/%d')
-    subject = config["email_subject"].format(date=date_str, count=total_count)
+def build_alert_body(warnings: list[str], config: dict) -> str:
+    """新着ゼロで通常メールが出ないときに送る、警告のみのメール本文。"""
+    date_str = datetime.now().strftime('%Y年%m月%d日 %H:%M')
+    lines = [
+        f"{config['email_header']} — 取得元の異常検知（{date_str}）\n",
+        f"{EMPTY_RUN_ALERT_THRESHOLD}回以上連続で取得に失敗している配信元があります。\n",
+    ]
+    lines.extend(warnings)
+    lines.append("")
+    lines.append("※ 配信元のURL変更・フィード廃止が疑われます。monitor.py の FEEDS を確認してください。")
+    return "\n".join(lines)
 
+
+def send_mail(subject: str, body: str):
     msg = MIMEMultipart()
     msg["From"] = GMAIL_ADDRESS
     msg["To"] = RECIPIENT_EMAIL
@@ -210,6 +344,11 @@ def send_email(body: str, total_count: int, config: dict):
         server.send_message(msg)
 
 
+def send_email(body: str, total_count: int, config: dict):
+    date_str = datetime.now().strftime('%m/%d')
+    send_mail(config["email_subject"].format(date=date_str, count=total_count), body)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--mode", choices=["ai", "realestate"], default="ai",
@@ -219,24 +358,39 @@ def main():
     config = MODE_CONFIG[args.mode]
     base_dir = Path(__file__).parent
 
-    # ── RSS フィード処理 ──────────────────────────────────
+    health_path = base_dir / config["health_file"]
+    health = load_health(health_path)
+
+    # ── 記事フィード処理（RSS / スクレイプ） ─────────────────
     seen_path = base_dir / config["seen_file"]
     seen = load_seen(seen_path)
     new_articles = []
 
-    rss_feeds = [f for f in FEEDS[args.mode] if f.get("type", "rss") == "rss"]
-    for feed_info in rss_feeds:
-        feed = fetch_feed(feed_info["url"])
-        for entry in feed.entries[:10]:
+    article_feeds = [f for f in FEEDS[args.mode] if f.get("type", "rss") in ("rss", "scrape")]
+    for feed_info in article_feeds:
+        name = feed_info["name"]
+        if feed_info.get("type", "rss") == "scrape":
+            entries, error = fetch_scraped_links(feed_info["url"], feed_info["link_pattern"])
+        else:
+            entries, error = fetch_feed(feed_info["url"])
+
+        record = record_health(health, name, ok=bool(entries), error=error)
+        if entries:
+            print(f"  [OK] {name}: {len(entries)}件取得")
+        else:
+            streak = record["consecutive_failures"]
+            print(f"  [失敗] {name}: {error}（{streak}回連続）")
+
+        for entry in entries[:10]:
             url = entry.get("link", "")
             if not url or url in seen:
                 continue
             title = entry.get("title", "(タイトルなし)")
-            print(f"  処理中: [{feed_info['name']}] {title}")
+            print(f"  処理中: [{name}] {title}")
             body = fetch_article_text(url)
-            summary = summarize(feed_info["name"], title, body, config)
+            summary = summarize(name, title, body, config)
             new_articles.append({
-                "source":  feed_info["name"],
+                "source":  name,
                 "title":   title,
                 "url":     url,
                 "summary": summary,
@@ -256,10 +410,12 @@ def main():
 
         for feed_info in watch_feeds:
             url = feed_info["url"]
-            print(f"  差分確認: [{feed_info['name']}]")
-            new_hash = compute_page_hash(url)
+            name = feed_info["name"]
+            print(f"  差分確認: [{name}]")
+            new_hash, error = compute_page_hash(url)
+            record = record_health(health, name, ok=bool(new_hash), error=error)
             if not new_hash:
-                print(f"    → 取得失敗、スキップ")
+                print(f"    → [失敗] {error}（{record['consecutive_failures']}回連続）")
                 continue
             old_hash = watch_hashes.get(url, "")
             if not old_hash:
@@ -275,15 +431,35 @@ def main():
 
         save_watch_hashes(watch_hashes, watch_path)
 
+    # ── 取得元の健全性チェック ────────────────────────────
+    warnings = collect_health_warnings(health)
+    for warning in warnings:
+        print(f"警告: {warning}")
+
+    # メール送信で落ちても取得結果の記録が消えないよう、先に保存しておく
+    save_health(health, health_path)
+
     # ── メール送信 ───────────────────────────────────────
     total_count = len(new_articles) + len(page_updates)
-    if total_count == 0:
-        print("新着・更新なし。メール送信をスキップします。")
-        return
 
-    email_body = build_email_body(new_articles, page_updates, config)
-    send_email(email_body, total_count, config)
-    print(f"メール送信完了（RSS:{len(new_articles)}件 / 更新検知:{len(page_updates)}件）")
+    if total_count > 0:
+        # 通常配信。警告があれば末尾に付けて気づけるようにする
+        email_body = build_email_body(new_articles, page_updates, config, warnings)
+        send_email(email_body, total_count, config)
+        print(f"メール送信完了（記事:{len(new_articles)}件 / 更新検知:{len(page_updates)}件）")
+    else:
+        print("新着・更新なし。メール送信をスキップします。")
+        # 新着が無いと通常メールが飛ばないため、警告だけ別途通知する（1日1回まで）
+        today = datetime.now().strftime("%Y-%m-%d")
+        if warnings and health.get("last_alert_date") != today:
+            alert_body = build_alert_body(warnings, config)
+            try:
+                send_mail(f"【監視警告】{len(warnings)}件の取得元が停止しています", alert_body)
+                health["last_alert_date"] = today
+                save_health(health, health_path)
+                print(f"取得エラー警告メールを送信しました（{len(warnings)}件）")
+            except Exception as e:
+                print(f"警告メールの送信に失敗: {e}")
 
 
 if __name__ == "__main__":

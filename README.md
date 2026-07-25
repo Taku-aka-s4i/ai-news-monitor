@@ -5,20 +5,29 @@ AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日
 ## 機能
 
 ### 監視対象（AIモード）
-| メディア | RSS URL |
-|---------|---------|
-| OpenAI | https://openai.com/news/rss.xml |
-| Anthropic | https://www.anthropic.com/rss.xml |
-| Google DeepMind | https://deepmind.google/blog/rss.xml |
-| VentureBeat AI | https://venturebeat.com/category/ai/feed/ |
-| TechCrunch AI | https://techcrunch.com/category/artificial-intelligence/feed/ |
-| Google AI Blog | https://blog.google/technology/ai/rss/ |
-| Hugging Face | https://huggingface.co/blog/feed.xml |
-| The Decoder | https://the-decoder.com/feed/ |
-| MIT Tech Review | https://www.technologyreview.com/feed/ |
+| メディア | URL | 方式 |
+|---------|-----|------|
+| OpenAI | https://openai.com/news/rss.xml | rss |
+| Anthropic | https://www.anthropic.com/news | scrape ※ |
+| Google DeepMind | https://deepmind.google/blog/rss.xml | rss |
+| VentureBeat AI | https://venturebeat.com/category/ai/feed/ | rss |
+| TechCrunch AI | https://techcrunch.com/category/artificial-intelligence/feed/ | rss |
+| Google AI Blog | https://blog.google/technology/ai/rss/ | rss |
+| Hugging Face | https://huggingface.co/blog/feed.xml | rss |
+| The Decoder | https://the-decoder.com/feed/ | rss |
+| MIT Tech Review | https://www.technologyreview.com/feed/ | rss |
+
+※ AnthropicはRSSを提供していない（2026-07-25時点で `/rss.xml` `/news/rss.xml` `/feed.xml` `/rss` `/news/feed.xml` `/engineering/rss.xml` が全て404、`/news` のHTMLにも `<link rel="alternate">` なし）。そのため一覧ページのHTMLから記事リンクとタイトルを直接抽出している。
+
+### 取得方式（FEEDSの `type`）
+| type | 動作 | 追加設定 |
+|------|------|---------|
+| `rss` | RSS/AtomフィードをパースしてURL・タイトルを取得 | — |
+| `scrape` | 一覧ページのHTMLから記事リンクを抽出（RSS非提供サイト用） | `link_pattern`（記事リンクとみなすhrefの正規表現） |
+| `watch` | ページ本文のハッシュを比較して更新を検知（要約はしない） | — |
 
 ### 処理フロー
-1. **RSS取得** — 各フィードから最新10件を取得
+1. **記事一覧の取得** — 各取得元から最新10件を取得（rss / scrape）
 2. **記事スクレイピング** — 本文をHTMLから抽出（失敗時はタイトル+URLにフォールバック）
 3. **日本語要約** — Claude API（Haiku）で3〜5行の平易な要約を生成
 4. **重複チェック** — 送信済み記事をJSONで管理し、同じ記事を2回送らない
@@ -32,6 +41,20 @@ AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日
 （日本語3〜5行の要約）
 🔗 元記事 → （URL）
 ```
+
+### 取得元の死活監視
+配信元のURL変更やフィード廃止に気づけるよう、取得元ごとの成否を記録している。
+
+- 実行ログに取得元ごとの結果を出力する
+  ```
+  [OK] OpenAI: 1050件取得
+  [失敗] Anthropic: 取得失敗: 404 Client Error（3回連続）
+  ```
+- 「取得できなかった」の判定は**取得件数が0件かどうか**で行う。HTTPエラー・パース失敗に加え、**200が返るが中身が空のフィード**も失敗として扱う（新着0件とは区別される）
+- 連続失敗が3回に達した取得元は警告対象になり、
+  - 通常の配信メールがある場合は、その末尾に「【取得元の異常】」セクションを付ける
+  - 新着ゼロで通常メールが飛ばない場合は、警告のみのメールを別途送る（1日1通まで）
+- 状態は `health_ai.json` / `health_realestate.json` に保存され、取得に成功すると連続失敗カウントは0に戻る
 
 ### 自動実行
 macOSのlaunchdで1日3回自動実行される。ログは `logs/monitor.log` に記録。
@@ -113,6 +136,8 @@ ai-news-monitor/
 ├── seen_ai.json             # AI関連の送信済み記事管理（自動生成）
 ├── seen_realestate.json     # 不動産関連の送信済み記事管理（自動生成）
 ├── seen_watch_realestate.json  # 不動産の差分検知ハッシュ（自動生成）
+├── health_ai.json           # AI取得元の死活状態（自動生成）
+├── health_realestate.json   # 不動産取得元の死活状態（自動生成）
 └── logs/
     └── monitor.log          # 実行ログ
 ```
