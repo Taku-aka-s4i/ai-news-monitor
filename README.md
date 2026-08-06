@@ -17,6 +17,21 @@ AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日
 | The Decoder | https://the-decoder.com/feed/ | rss |
 | MIT Tech Review | https://www.technologyreview.com/feed/ | rss |
 
+### 監視対象（SEOモード）（2026-08-06 追加）
+
+AI検索が検索流入の前提を壊しつつあるため追加。15時のAI2回目の枠を振り替えている。
+
+| メディア | URL | 方式 |
+|---------|-----|------|
+| Google検索セントラル | https://developers.google.com/search/blog/feed.xml | rss |
+| Search Engine Land | https://searchengineland.com/feed | rss |
+| 海外SEO情報ブログ | https://www.suzukikenichi.com/blog/feed/ | rss |
+| Ahrefs Blog | https://ahrefs.com/blog/feed/ | rss |
+
+不採用にした候補（2026-08-06時点の実測）: Web担当者Forum（`webtan.impress.co.jp/rss/index.rdf` が404）、Moz（配信1件のみ）、Search Engine Roundtable（日次雑報が中心で信号が薄い）。
+
+新しい取得元を足したときは、**現時点の記事を `seen_*.json` に仕込んでから**初回を迎えること。仕込まないと最新10件×フィード数が一気に配信される。
+
 ※ AnthropicはRSSを提供していない（2026-07-25時点で `/rss.xml` `/news/rss.xml` `/feed.xml` `/rss` `/news/feed.xml` `/engineering/rss.xml` が全て404、`/news` のHTMLにも `<link rel="alternate">` なし）。そのため一覧ページのHTMLから記事リンクとタイトルを直接抽出している。
 
 ### 取得方式（FEEDSの `type`）
@@ -60,7 +75,7 @@ AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日
 - 連続失敗が3回に達した取得元は警告対象になり、
   - 通常の配信メールがある場合は、その末尾に「【取得元の異常】」セクションを付ける
   - 新着ゼロで通常メールが飛ばない場合は、警告のみのメールを別途送る（1日1通まで）
-- 状態は `health_ai.json` / `health_realestate.json` に保存され、取得に成功すると連続失敗カウントは0に戻る
+- 状態は `health_ai.json` / `health_seo.json` / `health_realestate.json` に保存され、取得に成功すると連続失敗カウントは0に戻る
 
 ### 自動実行
 macOSのlaunchdで1日3回自動実行される。ログは `logs/monitor.log` に記録。
@@ -69,12 +84,14 @@ macOSのlaunchdで1日3回自動実行される。ログは `logs/monitor.log` �
 |-----|--------|-----|
 | 09:00 | ai | AI関連フィードを取得・要約・送信 |
 | 12:00 | realestate | 不動産関連フィードを取得・要約・送信 |
-| 15:00 | ai | AI関連フィードを再取得・要約・送信 |
+| 15:00 | seo | SEO・検索まわりのフィードを取得・要約・送信 |
+
+15時はもともとAIの2回目だったが、2026-08-06にSEOへ振り替えた。AIは朝9時の1回のみ。同じ分野が1日2回届くより、別分野が1回ずつ届くほうが読まれるため。
 
 launchdの`.plist`は `~/Library/LaunchAgents/` に配置:
 - `com.takuma.ai-news-monitor.ai-morning.plist`（9時／ai）
 - `com.takuma.ai-news-monitor.realestate-noon.plist`（12時／realestate）
-- `com.takuma.ai-news-monitor.ai-afternoon.plist`（15時／ai）
+- `com.takuma.ai-news-monitor.seo-afternoon.plist`（15時／seo）
 
 指定時刻にMacがスリープ中ならスリープ復帰時に、電源オフならログイン時に自動的に実行される（launchdの仕様）。
 
@@ -112,12 +129,14 @@ RECIPIENT_EMAIL=your@gmail.com
 ```bash
 python monitor.py --mode ai          # AI関連フィード
 python monitor.py --mode realestate  # 不動産関連フィード
+python monitor.py --mode seo         # SEO・検索関連フィード
 ```
 
 macOSの場合、ラッパースクリプト経由でも実行可能:
 ```bash
 ./run.sh ai
 ./run.sh realestate
+./run.sh seo
 ```
 
 ## 技術スタック
@@ -140,9 +159,11 @@ ai-news-monitor/
 ├── .env.example             # 認証情報テンプレート
 ├── .env                     # 認証情報（gitignore済み）
 ├── seen_ai.json             # AI関連の送信済み記事管理（自動生成）
+├── seen_seo.json            # SEO関連の送信済み記事管理（自動生成）
 ├── seen_realestate.json     # 不動産関連の送信済み記事管理（自動生成）
 ├── seen_watch_realestate.json  # 不動産の差分検知ハッシュ（自動生成）
 ├── health_ai.json           # AI取得元の死活状態（自動生成）
+├── health_seo.json          # SEO取得元の死活状態（自動生成）
 ├── health_realestate.json   # 不動産取得元の死活状態（自動生成）
 └── logs/
     └── monitor.log          # 実行ログ

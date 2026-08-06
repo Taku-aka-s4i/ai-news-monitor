@@ -42,6 +42,16 @@ FEEDS = {
         {"name": "The Decoder",           "url": "https://the-decoder.com/feed/",                                             "type": "rss", "section": ""},
         {"name": "MIT Tech Review",       "url": "https://www.technologyreview.com/feed/",                                    "type": "rss", "section": ""},
     ],
+    # AI検索が検索流入の前提を壊しつつあるため2026-08-06に追加。AIモードに同居させず独立させたのは、
+    # 15時枠（旧AI2回目）をまるごとSEOに充てているため。AIは朝9時の1回だけになった。
+    # Web担当者Forum(webtan.impress.co.jp/rss/index.rdf)は404、Mozは配信1件、
+    # Search Engine Roundtableは日次雑報で信号が薄く、いずれも2026-08-06時点で不採用。
+    "seo": [
+        {"name": "Google検索セントラル",  "url": "https://developers.google.com/search/blog/feed.xml",                         "type": "rss", "section": ""},
+        {"name": "Search Engine Land",    "url": "https://searchengineland.com/feed",                                         "type": "rss", "section": ""},
+        {"name": "海外SEO情報ブログ",     "url": "https://www.suzukikenichi.com/blog/feed/",                                  "type": "rss", "section": ""},
+        {"name": "Ahrefs Blog",           "url": "https://ahrefs.com/blog/feed/",                                             "type": "rss", "section": ""},
+    ],
     "realestate": [
         # 一次情報ライン（差分検知）
         {"name": "国交省 不動産価格指数", "url": "https://www.mlit.go.jp/totikensangyo/totikensangyo_tk5_000085.html", "type": "watch", "section": "一次情報"},
@@ -67,6 +77,16 @@ MODE_CONFIG = {
         "email_header":  "AI最新情報まとめ",
         "summary_prompt":       "以下はAI分野のメディア「{source}」の記事です（英語の場合も含む）。日本語で3〜5行、平易な言葉でざっくり要約してください。\n\nタイトル: {title}\n\n本文:\n{body}",
         "summary_prompt_notitle":"以下はAI分野のメディア「{source}」の記事タイトルです（英語の場合も含む）。タイトルから推測できる内容を日本語で3〜5行、平易な言葉で説明してください。\n\nタイトル: {title}",
+    },
+    "seo": {
+        "seen_file":    "seen_seo.json",
+        "watch_file":   None,
+        "health_file":  "health_seo.json",
+        "use_sections": False,
+        "email_subject": "【SEO新着】{date} — {count}件の新着記事",
+        "email_header":  "SEO・検索まわり最新情報まとめ",
+        "summary_prompt":       "以下は検索/SEO分野のメディア「{source}」の記事です（英語の場合も含む）。日本語で3〜5行、平易な言葉でざっくり要約してください。仕様変更やアルゴリズム更新の話であれば、サイト運営者にとって何が変わるのかが分かるように書いてください。\n\nタイトル: {title}\n\n本文:\n{body}",
+        "summary_prompt_notitle":"以下は検索/SEO分野のメディア「{source}」の記事タイトルです（英語の場合も含む）。タイトルから推測できる内容を日本語で3〜5行、平易な言葉で説明してください。\n\nタイトル: {title}",
     },
     "realestate": {
         "seen_file":    "seen_realestate.json",
@@ -361,8 +381,8 @@ def send_email(body: str, total_count: int, config: dict):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["ai", "realestate"], default="ai",
-                        help="配信モード: ai（朝9時・15時）または realestate（昼12時）")
+    parser.add_argument("--mode", choices=["ai", "realestate", "seo"], default="ai",
+                        help="配信モード: ai（朝9時）/ realestate（昼12時）/ seo（15時）")
     args = parser.parse_args()
 
     config = MODE_CONFIG[args.mode]

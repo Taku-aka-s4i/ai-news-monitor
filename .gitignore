@@ -5,7 +5,9 @@ __pycache__/
 seen_articles.json
 seen_ai.json
 seen_realestate.json
+seen_seo.json
 seen_watch_realestate.json
 health_ai.json
 health_realestate.json
+health_seo.json
 logs/
