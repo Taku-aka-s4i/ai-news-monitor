@@ -5,6 +5,8 @@ import hashlib
 import smtplib
 import re
 import argparse
+import truststore
+truststore.inject_into_ssl()
 import feedparser
 import requests
 from pathlib import Path
