@@ -17,12 +17,13 @@ from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from bs4 import BeautifulSoup
-from anthropic import Anthropic
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 load_dotenv()
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 GMAIL_ADDRESS = os.getenv("GMAIL_ADDRESS")
 GMAIL_APP_PASSWORD = os.getenv("GMAIL_APP_PASSWORD")
 RECIPIENT_EMAIL = os.getenv("RECIPIENT_EMAIL")
@@ -115,7 +116,8 @@ DEFAULT_MAX_ITEMS = 10
 
 UA_HEADERS = {"User-Agent": "Mozilla/5.0"}
 
-client = Anthropic(api_key=ANTHROPIC_API_KEY, timeout=60.0, max_retries=2)
+client = genai.Client(api_key=GEMINI_API_KEY)
+SUMMARY_MODEL = "gemini-3.1-flash-lite"
 
 
 def load_seen(seen_path: Path) -> set:
@@ -289,12 +291,12 @@ def summarize(source: str, title: str, body: str, config: dict) -> str:
     else:
         prompt = config["summary_prompt_notitle"].format(source=source, title=title)
 
-    message = client.messages.create(
-        model="claude-haiku-4-5-20251001",
-        max_tokens=400,
-        messages=[{"role": "user", "content": prompt}],
+    response = client.models.generate_content(
+        model=SUMMARY_MODEL,
+        contents=prompt,
+        config=types.GenerateContentConfig(max_output_tokens=400),
     )
-    return message.content[0].text.strip()
+    return response.text.strip()
 
 
 def build_email_body(articles: list[dict], page_updates: list[dict], config: dict,

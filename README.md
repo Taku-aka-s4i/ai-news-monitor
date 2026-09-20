@@ -1,6 +1,6 @@
 # ai-news-monitor
 
-AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日監視し、新着記事をClaude APIで日本語要約してGmailで届けるツール。
+AI企業（OpenAI・Anthropic・Google DeepMind）の公式ブログRSSを毎日監視し、新着記事をGemini APIで日本語要約してGmailで届けるツール。
 
 ## 機能
 
@@ -48,7 +48,7 @@ AI検索が検索流入の前提を壊しつつあるため追加。15時のAI2�
 ### 処理フロー
 1. **記事一覧の取得** — 各取得元から最新10件（`max_items`で変更可）を取得（rss / scrape）
 2. **記事スクレイピング** — 本文をHTMLから抽出（失敗時はタイトル+URLにフォールバック）
-3. **日本語要約** — Claude API（Haiku）で3〜5行の平易な要約を生成。1記事が失敗しても他の記事の配信は続行し、失敗した記事は既読にせず次回再試行する
+3. **日本語要約** — Gemini API（Flash-Lite）で3〜5行の平易な要約を生成。1記事が失敗しても他の記事の配信は続行し、失敗した記事は既読にせず次回再試行する
 4. **重複チェック** — 送信済み記事をJSONで管理し、同じ記事を2回送らない
 5. **Gmail送信** — SMTP SSLで指定アドレスにメール送信
 
@@ -119,7 +119,7 @@ pip install -r requirements.txt
 `.env.example` をコピーして `.env` を作成し、各値を埋める。
 
 ```
-ANTHROPIC_API_KEY=sk-ant-...        # console.anthropic.com で取得
+GEMINI_API_KEY=...                  # Google AI Studio（aistudio.google.com）で取得。課金を有効にした専用のGoogle Cloudプロジェクトを推奨
 GMAIL_ADDRESS=your@gmail.com
 GMAIL_APP_PASSWORD=xxxx xxxx xxxx xxxx  # Googleアカウント → セキュリティ → アプリパスワード
 RECIPIENT_EMAIL=your@gmail.com
@@ -143,7 +143,7 @@ macOSの場合、ラッパースクリプト経由でも実行可能:
 - Python 3.10+
 - `feedparser` — RSSパース
 - `requests` + `beautifulsoup4` — スクレイピング
-- `anthropic` — Claude API（要約生成）
+- `google-genai` — Gemini API（要約生成）
 - `python-dotenv` — 環境変数管理
 - Gmail SMTP — メール送信
 
