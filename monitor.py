@@ -48,9 +48,12 @@ FEEDS = {
     # 15時枠（旧AI2回目）をまるごとSEOに充てているため。AIは朝9時の1回だけになった。
     # Web担当者Forum(webtan.impress.co.jp/rss/index.rdf)は404、Mozは配信1件、
     # Search Engine Roundtableは日次雑報で信号が薄く、いずれも2026-08-06時点で不採用。
+    # Search Engine Landは2026-09-17頃からCloudflareのボット対策でフィード・サイト本体とも
+    # 403で全面ブロックされるようになり取得不能に。UA/Refererを変えても回避できないタイプの
+    # ブロックだったため、2026-09-20に同カテゴリのSearch Engine Journalへ差し替え。
     "seo": [
         {"name": "Google検索セントラル",  "url": "https://developers.google.com/search/blog/feed.xml",                         "type": "rss", "section": ""},
-        {"name": "Search Engine Land",    "url": "https://searchengineland.com/feed",                                         "type": "rss", "section": ""},
+        {"name": "Search Engine Journal", "url": "https://www.searchenginejournal.com/feed/",                                 "type": "rss", "section": ""},
         {"name": "海外SEO情報ブログ",     "url": "https://www.suzukikenichi.com/blog/feed/",                                  "type": "rss", "section": ""},
         {"name": "Ahrefs Blog",           "url": "https://ahrefs.com/blog/feed/",                                             "type": "rss", "section": ""},
     ],
